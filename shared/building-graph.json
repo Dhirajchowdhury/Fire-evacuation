@@ -1,0 +1,25 @@
+{
+  "nodes": [
+    { "id": "room_1",     "label": "Room 1",      "type": "room",     "zone": "A", "position": { "x": -6, "y": 0, "z": -3 }, "status": "safe" },
+    { "id": "room_2",     "label": "Room 2",      "type": "room",     "zone": "A", "position": { "x": -6, "y": 0, "z":  3 }, "status": "safe" },
+    { "id": "room_3",     "label": "Room 3",      "type": "room",     "zone": "C", "position": { "x":  6, "y": 0, "z": -3 }, "status": "safe" },
+    { "id": "room_4",     "label": "Room 4",      "type": "room",     "zone": "C", "position": { "x":  6, "y": 0, "z":  3 }, "status": "safe" },
+    { "id": "room_5",     "label": "Room 5",      "type": "room",     "zone": "D", "position": { "x":  0, "y": 0, "z":  6 }, "status": "safe" },
+    { "id": "corridor_1", "label": "Corridor 1",  "type": "corridor", "zone": "B", "position": { "x": -3, "y": 0, "z":  0 }, "status": "safe" },
+    { "id": "corridor_2", "label": "Corridor 2",  "type": "corridor", "zone": "D", "position": { "x":  3, "y": 0, "z":  3 }, "status": "safe" },
+    { "id": "central_hub","label": "Central Hub", "type": "hub",      "zone": "B", "position": { "x":  0, "y": 0, "z":  0 }, "status": "safe" },
+    { "id": "exit_1",     "label": "Exit 1",      "type": "exit",     "zone": null,"position": { "x": -6, "y": 0, "z":  0 }, "status": "exit" },
+    { "id": "exit_2",     "label": "Exit 2",      "type": "exit",     "zone": null,"position": { "x":  0, "y": 0, "z":  8 }, "status": "exit" }
+  ],
+  "edges": [
+    ["room_1",      "corridor_1"],
+    ["room_2",      "corridor_1"],
+    ["corridor_1",  "central_hub"],
+    ["corridor_1",  "exit_1"],
+    ["central_hub", "corridor_2"],
+    ["corridor_2",  "room_3"],
+    ["corridor_2",  "room_4"],
+    ["corridor_2",  "room_5"],
+    ["room_5",      "exit_2"]
+  ]
+}
