@@ -4,13 +4,17 @@ import dynamic from 'next/dynamic';
 import { supabase } from '../../../../lib/supabase';
 import { useAdminWorkspace } from '../../../../hooks/useAdminWorkspace';
 import type { ZoneStatus } from '../../../../../shared/types';
+import type { GraphNode, GraphEdge } from '../../../../lib/astar';
 
 const BuildingCanvas = dynamic(
   () => import('../../../../../visualization/three-engine/BuildingCanvas'),
   { ssr: false, loading: () => <div className="w-full h-full bg-slate-900 animate-pulse rounded-xl" /> }
 );
 
-const TABS = ['Upload Floor Plan', '3D Building View'] as const;
+const MapEditor = dynamic(() => import('./MapEditor'), { ssr: false });
+const Generate3DButton = dynamic(() => import('../../../../components/dashboard/Generate3DButton'), { ssr: false });
+
+const TABS = ['Upload Floor Plan', 'Map Editor', '3D Building View'] as const;
 type Tab = typeof TABS[number];
 
 export default function FloorPlanPage() {
@@ -24,6 +28,18 @@ export default function FloorPlanPage() {
   const [isPdf, setIsPdf]     = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const zones: ZoneStatus[]   = [];
+
+  // Graph state — loaded from workspace.building_graph
+  const [nodes, setNodes] = useState<GraphNode[]>(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const g = workspace?.building_graph as any;
+    return g?.nodes ?? [];
+  });
+  const [edges, setEdges] = useState<GraphEdge[]>(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const g = workspace?.building_graph as any;
+    return g?.edges ?? [];
+  });
 
   function showToast(msg: string, ok = true) {
     setToast({ msg, ok });
@@ -178,6 +194,30 @@ export default function FloorPlanPage() {
                 ? <iframe src={previewUrl} className="w-full h-64 sm:h-96 rounded-lg border border-slate-700" title="Floor plan PDF" />
                 : <img src={previewUrl} alt="Floor plan" className="w-full max-h-64 sm:max-h-96 object-contain rounded-lg" />
               }
+
+              {/* Generate 3D Model */}
+              {workspaceId && !isPdf && (
+                <div className="mt-4 pt-4 border-t border-slate-700">
+                  <p className="text-slate-400 text-xs uppercase tracking-wider mb-3">AI 3D Generation</p>
+                  <Generate3DButton workspaceId={workspaceId} imageUrl={previewUrl} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : tab === 'Map Editor' ? (
+        <div>
+          {previewUrl ? (
+            <MapEditor
+              workspaceId={workspaceId!}
+              imageUrl={previewUrl}
+              initialNodes={nodes}
+              initialEdges={edges}
+              onSaved={(n, e) => { setNodes(n); setEdges(e); }}
+            />
+          ) : (
+            <div className="rounded-xl border border-slate-700 p-8 text-center">
+              <p className="text-slate-400 text-sm">Upload a floor plan first, then use the Map Editor.</p>
             </div>
           )}
         </div>
