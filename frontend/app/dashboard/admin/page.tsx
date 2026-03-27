@@ -1,8 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { useAdminWorkspace } from '../../../hooks/useAdminWorkspace';
+import { useFireState } from '../../../hooks/useFireState';
 import type { ZoneStatus, ZoneAlert, SensorDevice, Announcement, Drill } from '../../../../shared/types';
 
 function StatCard({ label, value, sub, accent }: {
@@ -23,6 +25,8 @@ function Skeleton({ className }: { className?: string }) {
 
 export default function AdminOverview() {
   const { workspaceId, workspace, isLoading: wsLoading } = useAdminWorkspace();
+  const { fireNodeIds, isEmergency } = useFireState(workspaceId);
+  const router = useRouter();
   const [zones, setZones]               = useState<ZoneStatus[]>([]);
   const [alerts, setAlerts]             = useState<ZoneAlert[]>([]);
   const [sensors, setSensors]           = useState<SensorDevice[]>([]);
@@ -85,6 +89,27 @@ export default function AdminOverview() {
 
   return (
     <div className="space-y-6">
+      {/* Global fire emergency banner */}
+      {isEmergency && (
+        <div className="bg-red-950 border border-red-500 rounded-xl px-5 py-4 flex items-center justify-between gap-4 animate-pulse">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🚨</span>
+            <div>
+              <p className="text-red-300 font-black text-sm uppercase tracking-wider">FIRE EMERGENCY ACTIVE</p>
+              <p className="text-red-400 text-xs mt-0.5">
+                Nodes on fire: {[...fireNodeIds].join(', ')}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => router.push(`/map/${workspaceId}`)}
+            className="shrink-0 px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-lg transition-colors"
+          >
+            View Map →
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold text-white">Overview</h1>

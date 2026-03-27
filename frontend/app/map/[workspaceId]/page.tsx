@@ -1,16 +1,23 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Flame } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { astar } from '../../../lib/astar';
 import type { GraphNode, GraphEdge } from '../../../lib/astar';
-import { useRealtimeHazards } from '../../../hooks/useRealtimeHazards';
+import { useFireState } from '../../../hooks/useFireState';
 
 const EvacuationCanvas = dynamic(
   () => import('../../../components/map/EvacuationCanvas'),
-  { ssr: false }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-full flex items-center justify-center bg-black">
+        <div className="w-8 h-8 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    ),
+  }
 );
 
 interface WorkspaceData {
@@ -24,6 +31,7 @@ type Screen = 'loading' | 'ready' | 'evacuating' | 'no_map' | 'not_found';
 
 export default function EvacuationMapPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
+
   const [screen, setScreen]       = useState<Screen>('loading');
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
   const [baseNodes, setBaseNodes] = useState<GraphNode[]>([]);
@@ -32,23 +40,35 @@ export default function EvacuationMapPage() {
   const [startNode, setStartNode] = useState<string | null>(null);
   const [noPath, setNoPath]       = useState(false);
   const [wsId, setWsId]           = useState<string | null>(null);
+  const [overlayVisible, setOverlayVisible] = useState(false);
 
-  // Realtime hazards from FireSimPanel / ESP32
-  const { fireNodeIds } = useRealtimeHazards(wsId);
+  // Unified fire state — listens to BOTH esp32_nodes AND hazard_nodes
+  const { fireNodeIds, isEmergency } = useFireState(wsId);
 
-  // Merge base nodes with live hazard status
-  const nodes: GraphNode[] = baseNodes.map(n => ({
-    ...n,
-    status: fireNodeIds.has(n.id) ? 'fire' : 'safe',
-  }));
+  // Debounce timer for path recalc
+  const recalcTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Merge base nodes with live fire status — memoized to avoid re-renders
+  const nodes = useMemo<GraphNode[]>(
+    () => baseNodes.map(n => ({
+      ...n,
+      status: fireNodeIds.has(n.id) ? 'fire' : 'safe',
+    })),
+    [baseNodes, fireNodeIds]
+  );
+
+  // Debounced path recalculation
   const recalcPath = useCallback((ns: GraphNode[], es: GraphEdge[], start: string | null) => {
-    if (!start) { setPath([]); return; }
-    const result = astar(ns, es, start);
-    if (result) { setPath(result); setNoPath(false); }
-    else { setPath([]); setNoPath(true); }
+    if (recalcTimer.current) clearTimeout(recalcTimer.current);
+    recalcTimer.current = setTimeout(() => {
+      if (!start) { setPath([]); return; }
+      const result = astar(ns, es, start);
+      if (result) { setPath(result); setNoPath(false); }
+      else { setPath([]); setNoPath(true); }
+    }, 80); // 80ms debounce — fast enough to feel instant
   }, []);
 
+  // Load workspace data
   useEffect(() => {
     if (!workspaceId) { setScreen('not_found'); return; }
     supabase
@@ -72,11 +92,28 @@ export default function EvacuationMapPage() {
       });
   }, [workspaceId]);
 
-  // Recalc path whenever hazards or startNode changes
+  // AUTO-TRIGGER evacuation when any node catches fire
+  useEffect(() => {
+    if (isEmergency && screen === 'ready') {
+      setScreen('evacuating');
+    }
+  }, [isEmergency, screen]);
+
+  // Recalc path whenever fire state, start node, or edges change
   useEffect(() => {
     recalcPath(nodes, edges, startNode);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fireNodeIds, startNode, edges]);
+    return () => { if (recalcTimer.current) clearTimeout(recalcTimer.current); };
+  }, [nodes, edges, startNode, recalcPath]);
+
+  // Fade-in overlay text when evacuation starts
+  useEffect(() => {
+    if (screen === 'evacuating') {
+      setOverlayVisible(false);
+      const t = setTimeout(() => setOverlayVisible(true), 300);
+      return () => clearTimeout(t);
+    }
+    setOverlayVisible(false);
+  }, [screen]);
 
   function handleNodeClick(id: string) {
     if (screen !== 'evacuating') return;
@@ -85,15 +122,16 @@ export default function EvacuationMapPage() {
     setStartNode(id);
   }
 
+  // ── Static screens ─────────────────────────────────────────────────────────
   if (screen === 'loading') return (
-    <div className="min-h-screen bg-black flex flex-col items-center justify-center gap-4">
+    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-4">
       <div className="w-10 h-10 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
       <p className="text-slate-400 text-sm">Loading evacuation plan...</p>
     </div>
   );
 
   if (screen === 'not_found') return (
-    <div className="min-h-screen bg-black flex flex-col items-center justify-center px-6 text-center gap-4">
+    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center px-6 text-center gap-4">
       <div className="text-5xl">⚠️</div>
       <h1 className="text-white font-bold text-xl">Invalid QR Code</h1>
       <p className="text-slate-500 text-sm max-w-xs">This QR code is not linked to any registered building.</p>
@@ -101,103 +139,171 @@ export default function EvacuationMapPage() {
   );
 
   if (screen === 'no_map') return (
-    <div className="min-h-screen bg-black flex flex-col items-center justify-center px-6 text-center gap-4">
+    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center px-6 text-center gap-4">
       <div className="text-5xl">🗺️</div>
       <h1 className="text-white font-bold text-xl">No Evacuation Plan Available</h1>
       <p className="text-slate-500 text-sm max-w-xs">
         <span className="text-white font-medium">{workspace?.name}</span> has not uploaded a floor plan yet.
       </p>
+      <p className="text-slate-600 text-xs">Follow physical exit signs and staff instructions.</p>
     </div>
   );
 
   const hasGraph = nodes.length > 0;
   const isPdf    = workspace?.floor_plan_url?.toLowerCase().includes('.pdf') ?? false;
+  const isEvac   = screen === 'evacuating';
 
   return (
-    <div className="min-h-screen bg-black flex flex-col">
-      {/* Header */}
-      <header className="px-4 py-3 border-b border-white/5 flex items-center gap-3 shrink-0"
-        style={{ background: 'rgba(8,8,8,0.97)' }}>
-        <div className="w-8 h-8 rounded-lg bg-red-600 flex items-center justify-center shrink-0">
-          <Flame className="w-4 h-4 text-white" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-white font-bold text-sm truncate">Emergency Evacuation System</p>
-          <p className="text-slate-500 text-xs truncate">
-            {workspace?.name}{workspace?.location ? ` · ${workspace.location}` : ''}
-          </p>
-        </div>
-        {screen === 'evacuating' && (
-          <span className="shrink-0 text-xs text-red-400 font-bold animate-pulse">🚨 LIVE</span>
-        )}
-      </header>
-
-      {/* Fire alert */}
-      {fireNodeIds.size > 0 && (
-        <div className="px-4 py-2 flex items-center gap-2 shrink-0"
-          style={{ background: 'rgba(239,68,68,0.12)', borderBottom: '1px solid rgba(239,68,68,0.25)' }}>
-          <span className="text-red-400 animate-pulse">🔥</span>
-          <p className="text-red-300 text-xs font-semibold">
-            Fire detected in: {[...fireNodeIds].join(', ')} — Route recalculated
-          </p>
-        </div>
-      )}
-
-      {/* Map */}
-      <div className="flex-1 relative overflow-hidden">
-        {hasGraph && workspace?.floor_plan_url ? (
+    <>
+      {/* ── FULLSCREEN CANVAS (evacuation mode) ── */}
+      {isEvac && hasGraph && workspace?.floor_plan_url && (
+        <div className="fixed inset-0 z-0 bg-black">
           <EvacuationCanvas
             imageUrl={workspace.floor_plan_url}
             nodes={nodes}
             edges={edges}
-            path={screen === 'evacuating' ? path : []}
+            path={path}
             selectedNode={startNode}
             onNodeClick={handleNodeClick}
           />
-        ) : workspace?.floor_plan_url ? (
-          isPdf
-            ? <iframe src={workspace.floor_plan_url} className="w-full h-full border-0" title="Floor plan" />
-            : <img src={workspace.floor_plan_url} alt="Floor plan" className="w-full h-full object-contain" />
-        ) : null}
+        </div>
+      )}
 
-        {screen === 'evacuating' && (
-          <div className="absolute bottom-0 left-0 right-0 pointer-events-none px-4 pb-4 pt-12"
-            style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)' }}>
-            {noPath
-              ? <p className="text-red-400 font-bold text-center text-sm">⚠ No safe path — follow physical exit signs</p>
-              : path.length > 0
-                ? <p className="text-green-400 font-bold text-center text-sm">🟢 Follow the green path to exit</p>
-                : null}
-            {hasGraph && <p className="text-slate-500 text-center text-xs mt-1">Tap your location to recalculate</p>}
+      {/* ── MAIN LAYOUT ── */}
+      <div className={isEvac ? 'fixed inset-0 z-10 pointer-events-none' : 'min-h-screen bg-black flex flex-col'}>
+
+        {/* Header */}
+        <header
+          className="pointer-events-auto px-4 py-3 flex items-center gap-3 shrink-0"
+          style={{
+            background: isEvac ? 'rgba(0,0,0,0.78)' : 'rgba(8,8,8,0.97)',
+            backdropFilter: isEvac ? 'blur(10px)' : 'none',
+            borderBottom: '1px solid rgba(255,255,255,0.05)',
+          }}
+        >
+          <div className="w-8 h-8 rounded-lg bg-red-600 flex items-center justify-center shrink-0">
+            <Flame className="w-4 h-4 text-white" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-white font-bold leading-tight truncate" style={{ fontSize: 'clamp(13px,2vw,15px)' }}>
+              Emergency Evacuation System
+            </p>
+            <p className="text-slate-500 truncate" style={{ fontSize: 'clamp(11px,1.5vw,12px)' }}>
+              {workspace?.name}{workspace?.location ? ` · ${workspace.location}` : ''}
+            </p>
+          </div>
+          {isEvac && <span className="shrink-0 text-xs text-red-400 font-bold animate-pulse">🚨 LIVE</span>}
+        </header>
+
+        {/* Fire alert banner */}
+        {fireNodeIds.size > 0 && (
+          <div
+            className="pointer-events-auto px-4 py-2 flex items-center gap-2 shrink-0"
+            style={{ background: 'rgba(239,68,68,0.15)', borderBottom: '1px solid rgba(239,68,68,0.3)' }}
+          >
+            <span className="text-red-400 animate-pulse">🔥</span>
+            <p className="text-red-300 font-semibold" style={{ fontSize: 'clamp(11px,1.5vw,13px)' }}>
+              Fire detected: {[...fireNodeIds].join(', ')} — Route recalculated
+            </p>
           </div>
         )}
-      </div>
 
-      {/* Bottom */}
-      <div className="shrink-0 px-4 py-4 space-y-2"
-        style={{ background: 'rgba(6,6,6,0.97)', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-        {screen === 'ready' ? (
-          <>
-            <button onClick={() => setScreen('evacuating')}
-              className="w-full py-4 rounded-2xl text-white font-black text-lg flex items-center justify-center gap-2 active:scale-95 transition-transform"
-              style={{ background: 'linear-gradient(135deg,#dc2626,#ef4444)', boxShadow: '0 0 32px rgba(239,68,68,0.4)' }}>
-              🚨 Start Evacuation
-            </button>
-            <p className="text-center text-slate-600 text-xs">Only press in case of emergency</p>
-          </>
-        ) : (
-          <div className="flex gap-3">
-            <button onClick={() => { setScreen('ready'); setPath([]); }}
-              className="flex-1 py-3 rounded-xl border border-white/10 text-slate-400 text-sm font-medium">
-              ← Back
-            </button>
-            <a href="tel:112"
-              className="flex-1 py-3 rounded-xl bg-red-600 text-white text-sm font-bold text-center flex items-center justify-center">
-              📞 Call 112
-            </a>
+        {/* Map — ready mode only */}
+        {!isEvac && (
+          <div className="flex-1 relative overflow-hidden">
+            {hasGraph && workspace?.floor_plan_url ? (
+              <EvacuationCanvas
+                imageUrl={workspace.floor_plan_url}
+                nodes={nodes}
+                edges={edges}
+                path={[]}
+                selectedNode={startNode}
+                onNodeClick={handleNodeClick}
+              />
+            ) : workspace?.floor_plan_url ? (
+              isPdf
+                ? <iframe src={workspace.floor_plan_url} className="w-full h-full border-0" title="Floor plan" />
+                : <img src={workspace.floor_plan_url} alt="Floor plan" className="w-full h-full object-contain" />
+            ) : null}
           </div>
         )}
+
+        {/* Evacuation overlay text */}
+        {isEvac && (
+          <div
+            className="pointer-events-none absolute left-0 right-0 flex flex-col items-center px-4"
+            style={{ bottom: '120px', opacity: overlayVisible ? 1 : 0, transition: 'opacity 0.6s ease' }}
+          >
+            {noPath ? (
+              <div className="bg-red-950/85 border border-red-700 rounded-2xl px-5 py-3 text-center backdrop-blur-sm">
+                <p className="text-red-300 font-bold" style={{ fontSize: 'clamp(13px,2vw,15px)' }}>
+                  ⚠ No safe path available
+                </p>
+                <p className="text-red-400/70 text-xs mt-0.5">Follow physical exit signs</p>
+              </div>
+            ) : path.length > 0 ? (
+              <div className="bg-black/75 border border-green-500/30 rounded-2xl px-5 py-3 text-center backdrop-blur-sm">
+                <p className="text-green-400 font-bold" style={{ fontSize: 'clamp(13px,2vw,15px)' }}>
+                  🟢 Follow the green path to exit
+                </p>
+                <p className="text-slate-400 text-xs mt-0.5">Tap your location on the map to recalculate</p>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {/* Bottom buttons */}
+        <div
+          className="pointer-events-auto shrink-0 space-y-2"
+          style={{
+            position: isEvac ? 'fixed' : 'relative',
+            bottom: isEvac ? 0 : undefined,
+            left: isEvac ? 0 : undefined,
+            right: isEvac ? 0 : undefined,
+            padding: isEvac ? '12px 5% 20px' : '16px',
+            background: isEvac ? 'rgba(0,0,0,0.85)' : 'rgba(6,6,6,0.97)',
+            backdropFilter: isEvac ? 'blur(14px)' : 'none',
+            borderTop: '1px solid rgba(255,255,255,0.05)',
+          }}
+        >
+          {screen === 'ready' ? (
+            <>
+              <button
+                onClick={() => setScreen('evacuating')}
+                className="w-full rounded-2xl text-white font-black flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                style={{
+                  padding: 'clamp(14px,3vw,18px) 0',
+                  fontSize: 'clamp(16px,3vw,20px)',
+                  background: 'linear-gradient(135deg,#dc2626,#ef4444)',
+                  boxShadow: '0 0 32px rgba(239,68,68,0.45)',
+                }}
+              >
+                🚨 Start Evacuation
+              </button>
+              <p className="text-center text-slate-600" style={{ fontSize: 'clamp(11px,1.5vw,12px)' }}>
+                Only press in case of emergency
+              </p>
+            </>
+          ) : (
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setScreen('ready'); setPath([]); }}
+                className="flex-1 rounded-xl border border-white/10 text-slate-400 font-medium active:scale-95 transition-transform"
+                style={{ padding: 'clamp(12px,2.5vw,16px) 0', fontSize: 'clamp(13px,2vw,15px)' }}
+              >
+                ← Back
+              </button>
+              <a
+                href="tel:112"
+                className="flex-1 rounded-xl bg-red-600 text-white font-bold text-center flex items-center justify-center active:scale-95 transition-transform"
+                style={{ padding: 'clamp(12px,2.5vw,16px) 0', fontSize: 'clamp(13px,2vw,15px)' }}
+              >
+                📞 Call 112
+              </a>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
