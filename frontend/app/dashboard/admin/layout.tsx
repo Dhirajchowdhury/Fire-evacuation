@@ -9,19 +9,12 @@ import { useWorkspaceCtx } from './WorkspaceContext';
 import SafetyPermissionsModal, { shouldShowPermissions } from '../../../components/dashboard/SafetyPermissionsModal';
 
 const NAV = [
-  { icon: '📊', label: 'Overview',      href: '/dashboard/admin' },
-  { icon: '🗺️', label: 'Floor Plan',    href: '/dashboard/admin/floorplan' },
-  { icon: '📡', label: 'Sensors',       href: '/dashboard/admin/sensors' },
-  { icon: '💚', label: 'Sensor Health', href: '/dashboard/admin/health' },
-  { icon: '👥', label: 'Users',         href: '/dashboard/admin/users' },
-  { icon: '🌡️', label: 'Occupancy',    href: '/dashboard/admin/occupancy' },
-  { icon: '🔗', label: 'QR Code',       href: '/dashboard/admin/qrcode' },
-  { icon: '📢', label: 'Announcements', href: '/dashboard/admin/announcements' },
-  { icon: '🚨', label: 'Live Alerts',   href: '/dashboard/admin/alerts' },
-  { icon: '🧪', label: 'Drill Mode',    href: '/dashboard/admin/drills' },
-  { icon: '📊', label: 'Analytics',     href: '/dashboard/admin/analytics' },
-  { icon: '📁', label: 'Past Records',  href: '/dashboard/admin/records' },
-  { icon: '🆘', label: 'Emergency',     href: '/dashboard/admin/emergency' },
+  { icon: '📊', label: 'Overview',         href: '/dashboard/admin' },
+  { icon: '🗺️', label: 'Floor Plan',       href: '/dashboard/admin/floorplan' },
+  { icon: '📡', label: 'Monitoring',        href: '/dashboard/admin/monitoring' },
+  { icon: '🆘', label: 'Emergency',         href: '/dashboard/admin/emergency-hub' },
+  { icon: '👥', label: 'Users & Access',    href: '/dashboard/admin/access' },
+  { icon: '📈', label: 'Reports',           href: '/dashboard/admin/reports' },
 ];
 
 function SidebarContent({ onClose }: { onClose?: () => void }) {
@@ -63,7 +56,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-3 px-2">
         {NAV.map(({ icon, label, href }) => {
-          const active = pathname === href;
+          const active = pathname === href || (href !== '/dashboard/admin' && pathname.startsWith(href));
           return (
             <Link
               key={href}

@@ -6,6 +6,7 @@ import { Flame } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { astar } from '../../../lib/astar';
 import type { GraphNode, GraphEdge } from '../../../lib/astar';
+import { useRealtimeHazards } from '../../../hooks/useRealtimeHazards';
 
 const EvacuationCanvas = dynamic(
   () => import('../../../components/map/EvacuationCanvas'),
@@ -25,12 +26,21 @@ export default function EvacuationMapPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const [screen, setScreen]       = useState<Screen>('loading');
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
-  const [nodes, setNodes]         = useState<GraphNode[]>([]);
+  const [baseNodes, setBaseNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges]         = useState<GraphEdge[]>([]);
   const [path, setPath]           = useState<string[]>([]);
   const [startNode, setStartNode] = useState<string | null>(null);
   const [noPath, setNoPath]       = useState(false);
-  const [fireZones, setFireZones] = useState<Set<string>>(new Set());
+  const [wsId, setWsId]           = useState<string | null>(null);
+
+  // Realtime hazards from FireSimPanel / ESP32
+  const { fireNodeIds } = useRealtimeHazards(wsId);
+
+  // Merge base nodes with live hazard status
+  const nodes: GraphNode[] = baseNodes.map(n => ({
+    ...n,
+    status: fireNodeIds.has(n.id) ? 'fire' : 'safe',
+  }));
 
   const recalcPath = useCallback((ns: GraphNode[], es: GraphEdge[], start: string | null) => {
     if (!start) { setPath([]); return; }
@@ -50,9 +60,10 @@ export default function EvacuationMapPage() {
         if (error || !data) { setScreen('not_found'); return; }
         const ws = data as WorkspaceData;
         setWorkspace(ws);
+        setWsId(workspaceId);
         if (!ws.floor_plan_url) { setScreen('no_map'); return; }
         if (ws.building_graph?.nodes?.length) {
-          setNodes(ws.building_graph.nodes);
+          setBaseNodes(ws.building_graph.nodes);
           setEdges(ws.building_graph.edges ?? []);
           const first = ws.building_graph.nodes.find(n => n.type !== 'exit');
           if (first) setStartNode(first.id);
@@ -61,33 +72,11 @@ export default function EvacuationMapPage() {
       });
   }, [workspaceId]);
 
-  // Realtime fire updates
+  // Recalc path whenever hazards or startNode changes
   useEffect(() => {
-    if (!workspaceId) return;
-    const ch = supabase.channel(`fire-${workspaceId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'zones' }, (payload) => {
-        const row = payload.new as { zone_id: string; status: string };
-        if (!row) return;
-        setNodes(prev => {
-          const updated = prev.map(n =>
-            n.id.toLowerCase().includes(row.zone_id.toLowerCase())
-              ? { ...n, status: (row.status === 'fire' ? 'fire' : 'safe') as GraphNode['status'] }
-              : n
-          );
-          recalcPath(updated, edges, startNode);
-          return updated;
-        });
-        setFireZones(prev => {
-          const s = new Set(prev);
-          row.status === 'fire' ? s.add(row.zone_id) : s.delete(row.zone_id);
-          return s;
-        });
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [workspaceId, edges, startNode, recalcPath]);
-
-  useEffect(() => { recalcPath(nodes, edges, startNode); }, [startNode, nodes, edges, recalcPath]);
+    recalcPath(nodes, edges, startNode);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fireNodeIds, startNode, edges]);
 
   function handleNodeClick(id: string) {
     if (screen !== 'evacuating') return;
@@ -144,12 +133,12 @@ export default function EvacuationMapPage() {
       </header>
 
       {/* Fire alert */}
-      {fireZones.size > 0 && (
+      {fireNodeIds.size > 0 && (
         <div className="px-4 py-2 flex items-center gap-2 shrink-0"
           style={{ background: 'rgba(239,68,68,0.12)', borderBottom: '1px solid rgba(239,68,68,0.25)' }}>
           <span className="text-red-400 animate-pulse">🔥</span>
           <p className="text-red-300 text-xs font-semibold">
-            Fire in zone{fireZones.size > 1 ? 's' : ''}: {[...fireZones].join(', ')} — Route recalculated
+            Fire detected in: {[...fireNodeIds].join(', ')} — Route recalculated
           </p>
         </div>
       )}

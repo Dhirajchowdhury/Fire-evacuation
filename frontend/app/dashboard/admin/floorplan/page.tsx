@@ -13,8 +13,9 @@ const BuildingCanvas = dynamic(
 
 const MapEditor = dynamic(() => import('./MapEditor'), { ssr: false });
 const Generate3DButton = dynamic(() => import('../../../../components/dashboard/Generate3DButton'), { ssr: false });
+const FireSimPanel = dynamic(() => import('../../../../components/dashboard/FireSimPanel'), { ssr: false });
 
-const TABS = ['Upload Floor Plan', 'Map Editor', '3D Building View'] as const;
+const TABS = ['Upload Floor Plan', 'Map Editor', 'Fire Simulation', '3D Building View'] as const;
 type Tab = typeof TABS[number];
 
 export default function FloorPlanPage() {
@@ -202,6 +203,18 @@ export default function FloorPlanPage() {
                   <Generate3DButton workspaceId={workspaceId} imageUrl={previewUrl} />
                 </div>
               )}
+            </div>
+          )}
+        </div>
+      ) : tab === 'Fire Simulation' ? (
+        <div>
+          {workspaceId && nodes.length > 0 ? (
+            <FireSimPanel workspaceId={workspaceId} nodes={nodes} />
+          ) : (
+            <div className="rounded-xl border border-slate-700 p-8 text-center">
+              <p className="text-slate-400 text-sm">
+                {!workspaceId ? 'No workspace found.' : 'Add nodes in the Map Editor first, then simulate fire here.'}
+              </p>
             </div>
           )}
         </div>
