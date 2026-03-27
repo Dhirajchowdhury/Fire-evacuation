@@ -235,7 +235,8 @@ export default function MapEditor({ workspaceId, imageUrl, initialNodes, initial
           imageUrl={imageUrl}
           nodes={nodes}
           edges={edges}
-          path={[]}
+          allPaths={[]}
+          activePath={0}
           selectedNode={edgeStart ?? selected}
           onNodeClick={handleNodeClick}
           onNodeDrag={handleNodeDrag}

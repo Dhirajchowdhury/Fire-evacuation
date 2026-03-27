@@ -1,13 +1,12 @@
 /**
  * A* pathfinding on a 2D graph.
  * Nodes have x/y positions (percentage-based, 0-100).
- * Returns the shortest safe path from start to any exit node.
  */
 
 export interface GraphNode {
   id: string;
-  x: number;   // 0-100 percent
-  y: number;   // 0-100 percent
+  x: number;
+  y: number;
   type: 'room' | 'corridor' | 'exit' | 'hub';
   status: 'safe' | 'fire';
 }
@@ -18,20 +17,18 @@ export interface GraphEdge {
   blocked: boolean;
 }
 
+export interface PathResult {
+  path: string[];
+  exitId: string;
+  cost: number;
+}
+
 function dist(a: GraphNode, b: GraphNode): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-export function astar(
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-  startId: string
-): string[] | null {
+function buildAdj(nodes: GraphNode[], edges: GraphEdge[]): Map<string, string[]> {
   const nodeMap = new Map(nodes.map(n => [n.id, n]));
-  const exits   = nodes.filter(n => n.type === 'exit' && n.status !== 'fire').map(n => n.id);
-  if (!exits.length) return null;
-
-  // Build adjacency — skip blocked edges and fire nodes
   const adj = new Map<string, string[]>();
   for (const n of nodes) adj.set(n.id, []);
   for (const e of edges) {
@@ -43,27 +40,34 @@ export function astar(
     adj.get(e.from)!.push(e.to);
     adj.get(e.to)!.push(e.from);
   }
+  return adj;
+}
 
-  const start = nodeMap.get(startId);
-  if (!start || start.status === 'fire') return null;
+/**
+ * A* to a single specific exit.
+ * Returns path + cost, or null if unreachable.
+ */
+function astarToExit(
+  nodes: GraphNode[],
+  adj: Map<string, string[]>,
+  startId: string,
+  exitId: string
+): PathResult | null {
+  const nodeMap = new Map(nodes.map(n => [n.id, n]));
+  const start   = nodeMap.get(startId);
+  const goal    = nodeMap.get(exitId);
+  if (!start || !goal || start.status === 'fire') return null;
 
-  // Heuristic: min distance to any exit
-  function h(id: string): number {
-    const n = nodeMap.get(id)!;
-    return Math.min(...exits.map(eid => dist(n, nodeMap.get(eid)!)));
-  }
-
-  const gScore = new Map<string, number>();
-  const fScore = new Map<string, number>();
+  const gScore   = new Map<string, number>();
+  const fScore   = new Map<string, number>();
   const cameFrom = new Map<string, string>();
-  const open = new Set<string>();
+  const open     = new Set<string>();
 
   gScore.set(startId, 0);
-  fScore.set(startId, h(startId));
+  fScore.set(startId, dist(start, goal));
   open.add(startId);
 
   while (open.size > 0) {
-    // Pick node with lowest fScore
     let current = '';
     let best = Infinity;
     for (const id of open) {
@@ -71,12 +75,11 @@ export function astar(
       if (f < best) { best = f; current = id; }
     }
 
-    if (exits.includes(current)) {
-      // Reconstruct path
+    if (current === exitId) {
       const path: string[] = [];
       let c: string | undefined = current;
       while (c) { path.unshift(c); c = cameFrom.get(c); }
-      return path;
+      return { path, exitId, cost: gScore.get(exitId) ?? Infinity };
     }
 
     open.delete(current);
@@ -88,11 +91,49 @@ export function astar(
       if (tentativeG < (gScore.get(neighborId) ?? Infinity)) {
         cameFrom.set(neighborId, current);
         gScore.set(neighborId, tentativeG);
-        fScore.set(neighborId, tentativeG + h(neighborId));
+        fScore.set(neighborId, tentativeG + dist(neighbor, goal));
         open.add(neighborId);
       }
     }
   }
+  return null;
+}
 
-  return null; // No path found
+/**
+ * Find paths from startId to ALL reachable safe exits.
+ * Returns array sorted by cost (shortest first).
+ * The first element is the recommended path.
+ */
+export function astarAllPaths(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  startId: string
+): PathResult[] {
+  const exits = nodes.filter(n => n.type === 'exit' && n.status !== 'fire');
+  if (!exits.length) return [];
+
+  const adj     = buildAdj(nodes, edges);
+  const results: PathResult[] = [];
+
+  for (const exit of exits) {
+    const result = astarToExit(nodes, adj, startId, exit.id);
+    if (result) results.push(result);
+  }
+
+  // Sort by cost — shortest path first
+  results.sort((a, b) => a.cost - b.cost);
+  return results;
+}
+
+/**
+ * Original single-path A* — kept for backward compatibility.
+ * Returns the shortest safe path to any exit.
+ */
+export function astar(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  startId: string
+): string[] | null {
+  const results = astarAllPaths(nodes, edges, startId);
+  return results.length > 0 ? results[0].path : null;
 }

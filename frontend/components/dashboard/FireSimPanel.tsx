@@ -2,15 +2,16 @@
 /**
  * FireSimPanel — Admin debug panel to simulate ESP32 fire/safe signals.
  * Updates hazard_nodes table → triggers Supabase Realtime → map updates.
+ * Only shows/uses nodes that exist in the current building_graph.
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useRealtimeHazards } from '../../hooks/useRealtimeHazards';
 import type { GraphNode } from '../../lib/astar';
 
 interface Props {
   workspaceId: string;
-  nodes: GraphNode[];   // from building_graph
+  nodes: GraphNode[];
 }
 
 export default function FireSimPanel({ workspaceId, nodes }: Props) {
@@ -22,6 +23,29 @@ export default function FireSimPanel({ workspaceId, nodes }: Props) {
   const [toast, setToast]               = useState<string | null>(null);
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 2500); }
+
+  // Clean up stale hazard_nodes that no longer exist in the current map
+  useEffect(() => {
+    if (!workspaceId || nodes.length === 0) return;
+    const validIds = new Set(nodes.map(n => n.id));
+    supabase
+      .from('hazard_nodes')
+      .select('node_id')
+      .eq('workspace_id', workspaceId)
+      .then(({ data }) => {
+        const stale = (data ?? [])
+          .map((r: { node_id: string }) => r.node_id)
+          .filter((id: string) => !validIds.has(id));
+        if (stale.length > 0) {
+          supabase
+            .from('hazard_nodes')
+            .delete()
+            .eq('workspace_id', workspaceId)
+            .in('node_id', stale)
+            .then(() => {});
+        }
+      });
+  }, [workspaceId, nodes]);
 
   async function triggerUpdate() {
     if (!selectedNode) { showToast('Select a node first'); return; }
@@ -54,6 +78,9 @@ export default function FireSimPanel({ workspaceId, nodes }: Props) {
   }
 
   const roomNodes = nodes.filter(n => n.type !== 'exit');
+  const validNodeIds = new Set(nodes.map(n => n.id));
+  const relevantHazards = [...hazards.values()].filter(h => validNodeIds.has(h.node_id));
+  const activeFireIds = [...fireNodeIds].filter(id => validNodeIds.has(id));
 
   return (
     <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 space-y-5">
@@ -69,12 +96,21 @@ export default function FireSimPanel({ workspaceId, nodes }: Props) {
         </div>
       </div>
 
+      {/* No nodes warning */}
+      {nodes.length === 0 && (
+        <div className="bg-yellow-950/40 border border-yellow-800 rounded-xl px-4 py-3">
+          <p className="text-yellow-400 text-xs">
+            ⚠ No nodes in map yet. Add nodes in the Map Editor first, then save.
+          </p>
+        </div>
+      )}
+
       {/* Active fires */}
-      {fireNodeIds.size > 0 && (
+      {activeFireIds.length > 0 && (
         <div className="bg-red-950/40 border border-red-800 rounded-xl px-4 py-3">
           <p className="text-red-400 text-xs font-semibold mb-2">🔥 Active fire nodes:</p>
           <div className="flex flex-wrap gap-2">
-            {[...fireNodeIds].map(id => (
+            {activeFireIds.map(id => (
               <span key={id} className="text-xs bg-red-900/60 text-red-300 px-2 py-0.5 rounded-full font-mono">
                 {id}
               </span>
@@ -85,7 +121,7 @@ export default function FireSimPanel({ workspaceId, nodes }: Props) {
 
       {/* Controls */}
       <div className="space-y-3">
-        {/* Node selector */}
+        {/* Node selector — only current map nodes */}
         <div>
           <label className="text-slate-400 text-xs uppercase tracking-wider block mb-1.5">Node</label>
           <select
@@ -125,7 +161,7 @@ export default function FireSimPanel({ workspaceId, nodes }: Props) {
           </div>
         </div>
 
-        {/* Severity (only for fire) */}
+        {/* Severity */}
         {newStatus === 'fire' && (
           <div>
             <label className="text-slate-400 text-xs uppercase tracking-wider block mb-1.5">
@@ -162,8 +198,7 @@ export default function FireSimPanel({ workspaceId, nodes }: Props) {
           }
         </button>
 
-        {/* Clear all */}
-        {fireNodeIds.size > 0 && (
+        {activeFireIds.length > 0 && (
           <button
             onClick={clearAll}
             disabled={busy}
@@ -174,18 +209,16 @@ export default function FireSimPanel({ workspaceId, nodes }: Props) {
         )}
       </div>
 
-      {/* Node status table */}
-      {hazards.size > 0 && (
+      {/* Current hazard state — only current map nodes */}
+      {relevantHazards.length > 0 && (
         <div>
           <p className="text-slate-400 text-xs uppercase tracking-wider mb-2">Current Hazard State</p>
           <div className="space-y-1 max-h-40 overflow-y-auto">
-            {[...hazards.values()].map(h => (
+            {relevantHazards.map(h => (
               <div key={h.node_id} className="flex items-center justify-between text-xs px-3 py-1.5 rounded-lg bg-slate-800">
-                <span className="text-slate-300 font-mono">{h.node_id}</span>
-                <div className="flex items-center gap-2">
-                  {h.status === 'fire' && (
-                    <span className="text-orange-400">sev {h.severity}</span>
-                  )}
+                <span className="text-slate-300 font-mono truncate max-w-[60%]">{h.node_id}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {h.status === 'fire' && <span className="text-orange-400">sev {h.severity}</span>}
                   <span className={`px-2 py-0.5 rounded-full font-semibold ${
                     h.status === 'fire' ? 'bg-red-950 text-red-400' : 'bg-green-950 text-green-400'
                   }`}>

@@ -4,8 +4,8 @@ import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Flame } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
-import { astar } from '../../../lib/astar';
-import type { GraphNode, GraphEdge } from '../../../lib/astar';
+import { astarAllPaths } from '../../../lib/astar';
+import type { GraphNode, GraphEdge, PathResult } from '../../../lib/astar';
 import { useFireState } from '../../../hooks/useFireState';
 
 const EvacuationCanvas = dynamic(
@@ -32,23 +32,20 @@ type Screen = 'loading' | 'ready' | 'evacuating' | 'no_map' | 'not_found';
 export default function EvacuationMapPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
 
-  const [screen, setScreen]       = useState<Screen>('loading');
-  const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
-  const [baseNodes, setBaseNodes] = useState<GraphNode[]>([]);
-  const [edges, setEdges]         = useState<GraphEdge[]>([]);
-  const [path, setPath]           = useState<string[]>([]);
-  const [startNode, setStartNode] = useState<string | null>(null);
-  const [noPath, setNoPath]       = useState(false);
-  const [wsId, setWsId]           = useState<string | null>(null);
+  const [screen, setScreen]         = useState<Screen>('loading');
+  const [workspace, setWorkspace]   = useState<WorkspaceData | null>(null);
+  const [baseNodes, setBaseNodes]   = useState<GraphNode[]>([]);
+  const [edges, setEdges]           = useState<GraphEdge[]>([]);
+  const [allPaths, setAllPaths]     = useState<PathResult[]>([]);
+  const [activePath, setActivePath] = useState(0); // index into allPaths
+  const [startNode, setStartNode]   = useState<string | null>(null);
+  const [noPath, setNoPath]         = useState(false);
+  const [wsId, setWsId]             = useState<string | null>(null);
   const [overlayVisible, setOverlayVisible] = useState(false);
 
-  // Unified fire state — listens to BOTH esp32_nodes AND hazard_nodes
   const { fireNodeIds, isEmergency } = useFireState(wsId);
-
-  // Debounce timer for path recalc
   const recalcTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Merge base nodes with live fire status — memoized to avoid re-renders
   const nodes = useMemo<GraphNode[]>(
     () => baseNodes.map(n => ({
       ...n,
@@ -57,18 +54,22 @@ export default function EvacuationMapPage() {
     [baseNodes, fireNodeIds]
   );
 
-  // Debounced path recalculation
   const recalcPath = useCallback((ns: GraphNode[], es: GraphEdge[], start: string | null) => {
     if (recalcTimer.current) clearTimeout(recalcTimer.current);
     recalcTimer.current = setTimeout(() => {
-      if (!start) { setPath([]); return; }
-      const result = astar(ns, es, start);
-      if (result) { setPath(result); setNoPath(false); }
-      else { setPath([]); setNoPath(true); }
-    }, 80); // 80ms debounce — fast enough to feel instant
+      if (!start) { setAllPaths([]); return; }
+      const results = astarAllPaths(ns, es, start);
+      if (results.length > 0) {
+        setAllPaths(results);
+        setActivePath(0); // default to shortest
+        setNoPath(false);
+      } else {
+        setAllPaths([]);
+        setNoPath(true);
+      }
+    }, 80);
   }, []);
 
-  // Load workspace data
   useEffect(() => {
     if (!workspaceId) { setScreen('not_found'); return; }
     supabase
@@ -92,20 +93,18 @@ export default function EvacuationMapPage() {
       });
   }, [workspaceId]);
 
-  // AUTO-TRIGGER evacuation when any node catches fire
+  // Auto-trigger evacuation when fire detected
   useEffect(() => {
-    if (isEmergency && screen === 'ready') {
-      setScreen('evacuating');
-    }
+    if (isEmergency && screen === 'ready') setScreen('evacuating');
   }, [isEmergency, screen]);
 
-  // Recalc path whenever fire state, start node, or edges change
+  // Recalc all paths on fire/start/edge change
   useEffect(() => {
     recalcPath(nodes, edges, startNode);
     return () => { if (recalcTimer.current) clearTimeout(recalcTimer.current); };
   }, [nodes, edges, startNode, recalcPath]);
 
-  // Fade-in overlay text when evacuation starts
+  // Fade-in overlay
   useEffect(() => {
     if (screen === 'evacuating') {
       setOverlayVisible(false);
@@ -120,6 +119,7 @@ export default function EvacuationMapPage() {
     const n = nodes.find(n => n.id === id);
     if (!n || n.type === 'exit' || n.status === 'fire') return;
     setStartNode(id);
+    setActivePath(0);
   }
 
   // ── Static screens ─────────────────────────────────────────────────────────
@@ -145,31 +145,31 @@ export default function EvacuationMapPage() {
       <p className="text-slate-500 text-sm max-w-xs">
         <span className="text-white font-medium">{workspace?.name}</span> has not uploaded a floor plan yet.
       </p>
-      <p className="text-slate-600 text-xs">Follow physical exit signs and staff instructions.</p>
     </div>
   );
 
-  const hasGraph = nodes.length > 0;
-  const isPdf    = workspace?.floor_plan_url?.toLowerCase().includes('.pdf') ?? false;
-  const isEvac   = screen === 'evacuating';
+  const hasGraph  = nodes.length > 0;
+  const isPdf     = workspace?.floor_plan_url?.toLowerCase().includes('.pdf') ?? false;
+  const isEvac    = screen === 'evacuating';
+  const bestPath  = allPaths[activePath]?.path ?? [];
 
   return (
     <>
-      {/* ── FULLSCREEN CANVAS (evacuation mode) ── */}
+      {/* Fullscreen canvas in evacuation mode */}
       {isEvac && hasGraph && workspace?.floor_plan_url && (
         <div className="fixed inset-0 z-0 bg-black">
           <EvacuationCanvas
             imageUrl={workspace.floor_plan_url}
             nodes={nodes}
             edges={edges}
-            path={path}
+            allPaths={allPaths}
+            activePath={activePath}
             selectedNode={startNode}
             onNodeClick={handleNodeClick}
           />
         </div>
       )}
 
-      {/* ── MAIN LAYOUT ── */}
       <div className={isEvac ? 'fixed inset-0 z-10 pointer-events-none' : 'min-h-screen bg-black flex flex-col'}>
 
         {/* Header */}
@@ -195,7 +195,7 @@ export default function EvacuationMapPage() {
           {isEvac && <span className="shrink-0 text-xs text-red-400 font-bold animate-pulse">🚨 LIVE</span>}
         </header>
 
-        {/* Fire alert banner */}
+        {/* Fire alert */}
         {fireNodeIds.size > 0 && (
           <div
             className="pointer-events-auto px-4 py-2 flex items-center gap-2 shrink-0"
@@ -203,12 +203,12 @@ export default function EvacuationMapPage() {
           >
             <span className="text-red-400 animate-pulse">🔥</span>
             <p className="text-red-300 font-semibold" style={{ fontSize: 'clamp(11px,1.5vw,13px)' }}>
-              Fire detected: {[...fireNodeIds].join(', ')} — Route recalculated
+              Fire: {[...fireNodeIds].join(', ')} — {allPaths.length} route{allPaths.length !== 1 ? 's' : ''} available
             </p>
           </div>
         )}
 
-        {/* Map — ready mode only */}
+        {/* Map — ready mode */}
         {!isEvac && (
           <div className="flex-1 relative overflow-hidden">
             {hasGraph && workspace?.floor_plan_url ? (
@@ -216,7 +216,8 @@ export default function EvacuationMapPage() {
                 imageUrl={workspace.floor_plan_url}
                 nodes={nodes}
                 edges={edges}
-                path={[]}
+                allPaths={[]}
+                activePath={0}
                 selectedNode={startNode}
                 onNodeClick={handleNodeClick}
               />
@@ -228,26 +229,46 @@ export default function EvacuationMapPage() {
           </div>
         )}
 
-        {/* Evacuation overlay text */}
+        {/* Evacuation overlay */}
         {isEvac && (
           <div
-            className="pointer-events-none absolute left-0 right-0 flex flex-col items-center px-4"
-            style={{ bottom: '120px', opacity: overlayVisible ? 1 : 0, transition: 'opacity 0.6s ease' }}
+            className="pointer-events-none absolute left-0 right-0 flex flex-col items-center px-4 gap-2"
+            style={{ bottom: '130px', opacity: overlayVisible ? 1 : 0, transition: 'opacity 0.6s ease' }}
           >
             {noPath ? (
               <div className="bg-red-950/85 border border-red-700 rounded-2xl px-5 py-3 text-center backdrop-blur-sm">
                 <p className="text-red-300 font-bold" style={{ fontSize: 'clamp(13px,2vw,15px)' }}>
-                  ⚠ No safe path available
+                  ⚠ No safe path — follow physical exit signs
                 </p>
-                <p className="text-red-400/70 text-xs mt-0.5">Follow physical exit signs</p>
               </div>
-            ) : path.length > 0 ? (
-              <div className="bg-black/75 border border-green-500/30 rounded-2xl px-5 py-3 text-center backdrop-blur-sm">
-                <p className="text-green-400 font-bold" style={{ fontSize: 'clamp(13px,2vw,15px)' }}>
-                  🟢 Follow the green path to exit
-                </p>
-                <p className="text-slate-400 text-xs mt-0.5">Tap your location on the map to recalculate</p>
-              </div>
+            ) : bestPath.length > 0 ? (
+              <>
+                <div className="bg-black/75 border border-green-500/30 rounded-2xl px-5 py-3 text-center backdrop-blur-sm">
+                  <p className="text-green-400 font-bold" style={{ fontSize: 'clamp(13px,2vw,15px)' }}>
+                    🟢 Follow the green path to exit
+                  </p>
+                  <p className="text-slate-400 text-xs mt-0.5">Tap your location on the map to recalculate</p>
+                </div>
+
+                {/* Path selector — switch between routes */}
+                {allPaths.length > 1 && (
+                  <div className="pointer-events-auto flex gap-2 flex-wrap justify-center">
+                    {allPaths.map((p, i) => (
+                      <button
+                        key={p.exitId}
+                        onClick={() => setActivePath(i)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                          i === activePath
+                            ? 'bg-green-600 border-green-500 text-white'
+                            : 'bg-black/60 border-white/20 text-slate-300 hover:border-green-500'
+                        }`}
+                      >
+                        Route {i + 1} {i === 0 ? '(shortest)' : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
             ) : null}
           </div>
         )}
@@ -287,7 +308,7 @@ export default function EvacuationMapPage() {
           ) : (
             <div className="flex gap-3">
               <button
-                onClick={() => { setScreen('ready'); setPath([]); }}
+                onClick={() => { setScreen('ready'); setAllPaths([]); }}
                 className="flex-1 rounded-xl border border-white/10 text-slate-400 font-medium active:scale-95 transition-transform"
                 style={{ padding: 'clamp(12px,2.5vw,16px) 0', fontSize: 'clamp(13px,2vw,15px)' }}
               >
