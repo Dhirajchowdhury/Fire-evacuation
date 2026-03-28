@@ -8,12 +8,14 @@ import AlertsPage from '../alerts/page';
 import { useAdminWorkspace } from '../../../../hooks/useAdminWorkspace';
 
 const ESP32SimPanel = dynamic(() => import('../../../../components/dashboard/ESP32SimPanel'), { ssr: false });
+const FireAnalysisPanel = dynamic(() => import('../../../../components/dashboard/FireAnalysisPanel'), { ssr: false });
 
 const TABS = [
   { id: 'sensors',   label: 'Sensors',       icon: '📡' },
   { id: 'health',    label: 'Sensor Health',  icon: '💚' },
   { id: 'occupancy', label: 'Occupancy',      icon: '🌡️' },
   { id: 'alerts',    label: 'Live Alerts',    icon: '🚨' },
+  { id: 'analysis',  label: 'Fire Analysis',  icon: '🔥' },
   { id: 'esp32',     label: 'ESP32 Simulator',icon: '🔌' },
 ] as const;
 
@@ -52,6 +54,7 @@ export default function MonitoringPage() {
         {tab === 'health'    && <SensorHealthPage />}
         {tab === 'occupancy' && <OccupancyPage />}
         {tab === 'alerts'    && <AlertsPage />}
+        {tab === 'analysis'  && <FireAnalysisPanel />}
         {tab === 'esp32'     && workspaceId && <ESP32SimPanel workspaceId={workspaceId} />}
         {tab === 'esp32'     && !workspaceId && (
           <p className="text-slate-500 text-sm">Loading workspace...</p>

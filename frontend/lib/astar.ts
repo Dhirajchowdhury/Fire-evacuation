@@ -58,6 +58,8 @@ function astarToExit(
   const goal    = nodeMap.get(exitId);
   if (!start || !goal || start.status === 'fire') return null;
 
+  const fireNodes = nodes.filter(n => n.status === 'fire');
+
   const gScore   = new Map<string, number>();
   const fScore   = new Map<string, number>();
   const cameFrom = new Map<string, string>();
@@ -87,7 +89,18 @@ function astarToExit(
 
     for (const neighborId of (adj.get(current) ?? [])) {
       const neighbor = nodeMap.get(neighborId)!;
-      const tentativeG = (gScore.get(current) ?? Infinity) + dist(curNode, neighbor);
+      
+      let dangerPenalty = 0;
+      for (const fn of fireNodes) {
+        const d = dist(neighbor, fn);
+        if (d < 25) { // Arbitrary threshold for "near fire"
+           dangerPenalty += 2000 / Math.max(d, 0.1);
+        }
+      }
+
+      const stepCost = dist(curNode, neighbor) + dangerPenalty;
+      const tentativeG = (gScore.get(current) ?? Infinity) + stepCost;
+      
       if (tentativeG < (gScore.get(neighborId) ?? Infinity)) {
         cameFrom.set(neighborId, current);
         gScore.set(neighborId, tentativeG);

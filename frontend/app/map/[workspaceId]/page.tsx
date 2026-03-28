@@ -54,6 +54,10 @@ export default function EvacuationMapPage() {
     [baseNodes, fireNodeIds]
   );
 
+  useEffect(() => {
+    console.log("NODES FROM DB:", nodes);
+  }, [nodes]);
+
   const recalcPath = useCallback((ns: GraphNode[], es: GraphEdge[], start: string | null) => {
     if (recalcTimer.current) clearTimeout(recalcTimer.current);
     recalcTimer.current = setTimeout(() => {
@@ -238,36 +242,23 @@ export default function EvacuationMapPage() {
             {noPath ? (
               <div className="bg-red-950/85 border border-red-700 rounded-2xl px-5 py-3 text-center backdrop-blur-sm">
                 <p className="text-red-300 font-bold" style={{ fontSize: 'clamp(13px,2vw,15px)' }}>
-                  ⚠ No safe path — follow physical exit signs
+                  ⚠ No safe path available
                 </p>
               </div>
             ) : bestPath.length > 0 ? (
               <>
                 <div className="bg-black/75 border border-green-500/30 rounded-2xl px-5 py-3 text-center backdrop-blur-sm">
                   <p className="text-green-400 font-bold" style={{ fontSize: 'clamp(13px,2vw,15px)' }}>
-                    🟢 Follow the green path to exit
+                    🟢 Safest route selected automatically
                   </p>
-                  <p className="text-slate-400 text-xs mt-0.5">Tap your location on the map to recalculate</p>
+                  {allPaths.length > 1 ? (
+                     <p className="text-slate-400 text-xs mt-0.5">Alternative routes available</p>
+                  ) : (
+                     <p className="text-slate-400 text-xs mt-0.5">Follow the highlighted path to safety</p>
+                  )}
                 </div>
 
-                {/* Path selector — switch between routes */}
-                {allPaths.length > 1 && (
-                  <div className="pointer-events-auto flex gap-2 flex-wrap justify-center">
-                    {allPaths.map((p, i) => (
-                      <button
-                        key={p.exitId}
-                        onClick={() => setActivePath(i)}
-                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
-                          i === activePath
-                            ? 'bg-green-600 border-green-500 text-white'
-                            : 'bg-black/60 border-white/20 text-slate-300 hover:border-green-500'
-                        }`}
-                      >
-                        Route {i + 1} {i === 0 ? '(shortest)' : ''}
-                      </button>
-                    ))}
-                  </div>
-                )}
+
               </>
             ) : null}
           </div>

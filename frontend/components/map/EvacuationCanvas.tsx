@@ -141,6 +141,49 @@ export default function EvacuationCanvas({
     const H = canvas.height / dpr.current;
     const t = Date.now();
 
+    function drawFireZone(node: GraphNode) {
+      const pos = getPos(node);
+      const { cx, cy } = toPx(pos.x, pos.y, W, H);
+      const zoneNodeRadius = 45;
+      const time = t / 1000;
+      const scale = 1 + 0.4 * Math.sin(time);
+      const scaledR = zoneNodeRadius * scale;
+
+      ctx!.save();
+      ctx!.shadowColor = 'red';
+      ctx!.shadowBlur = 25;
+      
+      const grad = ctx!.createRadialGradient(cx, cy, zoneNodeRadius * 0.2, cx, cy, scaledR * 2.5);
+      grad.addColorStop(0, 'rgba(255, 0, 0, 0.5)');
+      grad.addColorStop(1, 'rgba(255, 0, 0, 0)');
+      
+      ctx!.fillStyle = grad;
+      ctx!.beginPath();
+      ctx!.arc(cx, cy, scaledR * 2.5, 0, Math.PI * 2); 
+      ctx!.fill();
+      ctx!.restore();
+    }
+
+    function drawSafeZone(node: GraphNode) {
+      const pos = getPos(node);
+      const { cx, cy } = toPx(pos.x, pos.y, W, H);
+      const zoneNodeRadius = 45;
+      const time = t / 1000;
+      const scale = 1 + 0.2 * Math.sin(time * Math.PI);
+      const scaledR = zoneNodeRadius * scale;
+
+      ctx!.save();
+      const grad = ctx!.createRadialGradient(cx, cy, zoneNodeRadius * 0.2, cx, cy, scaledR * 2.5);
+      grad.addColorStop(0, 'rgba(0, 255, 120, 0.25)');
+      grad.addColorStop(1, 'rgba(0, 255, 120, 0)');
+      
+      ctx!.fillStyle = grad;
+      ctx!.beginPath();
+      ctx!.arc(cx, cy, scaledR * 2.5, 0, Math.PI * 2);
+      ctx!.fill();
+      ctx!.restore();
+    }
+
     ctx.save();
     ctx.scale(dpr.current, dpr.current);
     ctx.clearRect(0, 0, W, H);
@@ -160,90 +203,15 @@ export default function EvacuationCanvas({
     const nodeMap = new Map(nodes.map(n => [n.id, n]));
 
     // ── LAYER 2: Zone status areas — large filled regions ─────────────────
-    for (const n of nodes) {
-      const pos = getPos(n);
-      const { cx, cy } = toPx(pos.x, pos.y, W, H);
-      const isFire = n.status === 'fire';
+    nodes.forEach(node => {
+      if (!node.status) return;
 
-      // Zone area — large rectangle behind the node
-      const zoneW = W * 0.18;  // 18% of canvas width
-      const zoneH = H * 0.22;  // 22% of canvas height
-
-      if (isFire) {
-        const phase   = (t % 1200) / 1200;
-        const opacity = 0.55 + 0.35 * Math.sin(phase * Math.PI);
-
-        // Solid red zone fill
-        ctx.save();
-        ctx.globalAlpha = opacity * 0.4;
-        ctx.fillStyle   = '#ff1a00';
-        ctx.beginPath();
-        ctx.roundRect(cx - zoneW / 2, cy - zoneH / 2, zoneW, zoneH, 8);
-        ctx.fill();
-        ctx.restore();
-
-        // Red zone border
-        ctx.save();
-        ctx.strokeStyle = `rgba(255,50,0,${opacity})`;
-        ctx.lineWidth   = 2.5;
-        ctx.shadowColor = '#ff3b00';
-        ctx.shadowBlur  = 18;
-        ctx.beginPath();
-        ctx.roundRect(cx - zoneW / 2, cy - zoneH / 2, zoneW, zoneH, 8);
-        ctx.stroke();
-        ctx.restore();
-
-        // Pulsing glow circle
-        const scale = 1 + 0.5 * Math.sin(phase * Math.PI);
-        const r     = BASE_R * 3 * scale;
-        const grad  = ctx.createRadialGradient(cx, cy, BASE_R, cx, cy, r);
-        grad.addColorStop(0,   `rgba(255,20,0,${opacity * 0.7})`);
-        grad.addColorStop(1,   'rgba(255,0,0,0)');
-        ctx.save();
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-
-      } else {
-        const phase   = (t % 2000) / 2000;
-        const opacity = 0.35 + 0.2 * Math.sin(phase * Math.PI);
-
-        // Solid green zone fill
-        ctx.save();
-        ctx.globalAlpha = opacity * 0.3;
-        ctx.fillStyle   = '#00ff64';
-        ctx.beginPath();
-        ctx.roundRect(cx - zoneW / 2, cy - zoneH / 2, zoneW, zoneH, 8);
-        ctx.fill();
-        ctx.restore();
-
-        // Green zone border
-        ctx.save();
-        ctx.strokeStyle = `rgba(0,255,100,${opacity * 0.8})`;
-        ctx.lineWidth   = 1.5;
-        ctx.shadowColor = '#00ff64';
-        ctx.shadowBlur  = 10;
-        ctx.beginPath();
-        ctx.roundRect(cx - zoneW / 2, cy - zoneH / 2, zoneW, zoneH, 8);
-        ctx.stroke();
-        ctx.restore();
-
-        // Soft glow circle
-        const scale = 1 + 0.2 * Math.sin(phase * Math.PI);
-        const r     = BASE_R * 2.4 * scale;
-        const grad  = ctx.createRadialGradient(cx, cy, BASE_R, cx, cy, r);
-        grad.addColorStop(0,   `rgba(0,255,100,${opacity * 0.55})`);
-        grad.addColorStop(1,   'rgba(0,255,100,0)');
-        ctx.save();
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
+      if (node.status === "fire") {
+        drawFireZone(node);
+      } else if (node.status === "safe") {
+        drawSafeZone(node);
       }
-    }
+    });
 
     // ── LAYER 3: Graph edges ───────────────────────────────────────────────
     for (const e of edges) {
@@ -278,13 +246,21 @@ export default function EvacuationCanvas({
       }
       if (pts.length < 2) continue;
       ctx.save();
-      ctx.strokeStyle = 'rgba(0,255,136,0.2)';
+      ctx.strokeStyle = 'rgba(0,255,100,0.3)';
       ctx.lineWidth   = 2;
       ctx.lineCap     = 'round';
       ctx.setLineDash([8, 8]);
       ctx.beginPath();
       pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.cx, p.cy) : ctx.lineTo(p.cx, p.cy));
       ctx.stroke();
+      
+      // Label for secondary routes
+      const mid = pts[Math.floor(pts.length / 2)];
+      ctx.fillStyle = "rgba(0,255,100,0.8)";
+      ctx.font = "bold 10px sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText("👉 Alternative", mid.cx, mid.cy - 12);
       ctx.restore();
     }
 
@@ -325,13 +301,13 @@ export default function EvacuationCanvas({
         // Animated dashed core
         ctx.save();
         ctx.strokeStyle    = C.path;
-        ctx.lineWidth      = PATH_W;
+        ctx.lineWidth      = 6; // Thicker core
         ctx.lineCap        = 'round';
         ctx.lineJoin       = 'round';
         ctx.setLineDash([16, 10]);
-        ctx.lineDashOffset = -dashOff.current;
+        ctx.lineDashOffset = -dashOff.current * 1.5; // Fast animated arrow flow 
         ctx.shadowColor    = C.path;
-        ctx.shadowBlur     = 12;
+        ctx.shadowBlur     = 20; // Stronger glow
         ctx.beginPath();
         pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.cx, p.cy) : ctx.lineTo(p.cx, p.cy));
         ctx.stroke();
@@ -370,6 +346,17 @@ export default function EvacuationCanvas({
         ctx.beginPath();
         ctx.arc(start.cx, start.cy, BASE_R + 7 + pulse * 5, 0, Math.PI * 2);
         ctx.stroke();
+        
+        // Label for primary route
+        const mid = pts[Math.floor(pts.length / 2)];
+        ctx.fillStyle = "#00FF88";
+        ctx.font = "bold 12px sans-serif";
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = "#000";
+        ctx.shadowBlur = 4;
+        ctx.fillText("👉 Best Route", mid.cx, mid.cy - 16);
+        
         ctx.restore();
       }
     }
@@ -385,18 +372,28 @@ export default function EvacuationCanvas({
       const isHovered  = n.id === hoveredNode.current;
       const isDragged  = n.id === dragging.current;
 
+      const isActiveExit = isExit && allPaths[activePath]?.exitId === n.id;
+      const isReachableExit = isExit && allPaths.some(p => p.exitId === n.id);
+      const isBlockedExit = isExit && !isReachableExit;
+
       ctx.save();
 
       if (isFire) {
         const blink = 0.5 + 0.5 * Math.abs(Math.sin(t / 260));
         ctx.shadowColor = '#ff3b2f';
         ctx.shadowBlur  = 20 + blink * 16;
+      } else if (isBlockedExit) {
+        ctx.shadowColor = '#ff3b2f';
+        ctx.shadowBlur  = 15;
+      } else if (isActiveExit) {
+        ctx.shadowColor = '#00ff88';
+        ctx.shadowBlur  = 20;
+      } else if (isReachableExit) {
+        ctx.shadowColor = '#22c55e';
+        ctx.shadowBlur  = 10;
       } else if (isOnPath) {
         ctx.shadowColor = C.path;
         ctx.shadowBlur  = 14;
-      } else if (isExit) {
-        ctx.shadowColor = '#22c55e';
-        ctx.shadowBlur  = 10;
       } else if (isSelected || isHovered) {
         ctx.shadowColor = '#fff';
         ctx.shadowBlur  = 8;
@@ -444,6 +441,10 @@ export default function EvacuationCanvas({
         ctx.font      = '8px sans-serif';
         ctx.fillText(n.id.split('_')[0], cx, cy + r + 9);
       }
+
+      ctx.fillStyle = "red";
+      ctx.font = "bold 12px sans-serif";
+      ctx.fillText(n.status, cx, cy - r - 10);
 
       ctx.restore();
     }
