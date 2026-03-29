@@ -220,8 +220,8 @@ function Hero({ user, onSignup }: HeroProps) {
             </h1>
 
             <p className="hero-sub text-[#777] text-base sm:text-lg mt-6 leading-relaxed max-w-md">
-              FireRoute transforms any building into an intelligent evacuation network.
-              Real-time IoT sensors. Dynamic BFS routing. Life-saving decisions in under 2 seconds.
+              FireRoute transforms any building into an intelligent and safe evacuation network.
+              Real-time IoT sensors. Dynamic A* routing. Life-saving decisions in under 2 seconds.
             </p>
 
             <div className="hero-btns flex flex-wrap gap-3 mt-8">
